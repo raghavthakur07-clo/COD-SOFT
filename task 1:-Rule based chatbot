@@ -1,0 +1,102 @@
+from datetime import datetime
+import random
+import time
+
+def friendly_response(user_message):
+    user_message = user_message.lower().strip("?.!,")
+    
+    # Greetings - with variety
+    greeting_words = ["hello", "hi", "hey", "howdy", "greetings", "yo"]
+    if any(word in user_message for word in greeting_words):
+        greetings = [
+            "Hey there! How's your day going?",
+            "Hi! Nice to chat with you!",
+            "Hello! What's on your mind today?",
+            "Hey! Great to hear from you."
+        ]
+        return random.choice(greetings)
+    
+    # Asking about the chatbot
+    identity_phrases = ["who are you", "what are you", "your name"]
+    if any(phrase in user_message for phrase in identity_phrases):
+        return "Oh, I'm just a friendly program someone made to chat with. You can think of me as a digital pen pal!"
+    
+    # Asking about well-being
+    wellbeing_phrases = ["how are you", "how do you feel", "how's it going"]
+    if any(phrase in user_message for phrase in wellbeing_phrases):
+        feelings = [
+            "I'm doing pretty well, thanks for asking! How about you?",
+            "All systems go over here! How are you doing?",
+            "Can't complain! What's new with you?"
+        ]
+        return random.choice(feelings)
+    
+    # Time questions
+    if "time" in user_message:
+        current_time = datetime.now().strftime("%I:%M %p")
+        time_responses = [
+            f"Looks like it's about {current_time} right now.",
+            f"My clock shows {current_time}.",
+            f"Right now it's {current_time}."
+        ]
+        return random.choice(time_responses)
+    
+    # Date questions
+    if "date" in user_message:
+        current_date = datetime.now().strftime("%B %d, %Y")
+        return f"Today is {current_date}. Can you believe how fast time flies?"
+    
+    # Goodbyes
+    goodbye_words = ["bye", "exit", "goodbye", "see you", "later", "cya"]
+    if any(word in user_message for word in goodbye_words):
+        farewells = [
+            "Take care! It was nice chatting with you.",
+            "See you later! Don't be a stranger.",
+            "Bye for now! Hope to talk again soon.",
+            "Alright, catch you next time!",
+            "Goodbye! Have a wonderful day."
+        ]
+        return random.choice(farewells)
+    
+    # Thank you responses
+    if "thank" in user_message:
+        thanks = [
+            "You're welcome!",
+            "Happy to help!",
+            "Anytime!",
+            "No problem at all."
+        ]
+        return random.choice(thanks)
+    
+    # Default response - more natural
+    default_responses = [
+        "That's interesting! Tell me more.",
+        "I'm not sure I understand. Could you explain that differently?",
+        "Hmm, I don't know much about that. What else are you interested in?",
+        "Oh, I see. What do you think about that?",
+        "Interesting point. What else is on your mind?"
+    ]
+    return random.choice(default_responses)
+
+# Chat program with a more natural flow
+print("Hey there! I'm here if you want to chat. (Type something to start or 'bye' to end)")
+
+while True:
+    # Small delay to make it feel more natural
+    time.sleep(0.5)
+    
+    user_input = input("You: ").strip()
+    
+    if not user_input:
+        print("... (silence)")
+        continue
+        
+    response = friendly_response(user_input)
+    
+    # Add a slight delay before responding to feel more human
+    time.sleep(0.8)
+    print(f"Chat: {response}")
+    
+    # Check if it's time to end the conversation
+    if any(word in user_input.lower() for word in ["bye", "exit", "goodbye", "see you", "later"]):
+        break
