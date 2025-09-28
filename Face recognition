@@ -1,0 +1,739 @@
+import cv2
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, ttk
+import pickle
+from datetime import datetime
+from PIL import Image, ImageTk
+import shutil
+
+# Check if OpenCV is installed correctly
+try:
+    print(f"OpenCV version: {cv2.__version__}")
+except:
+    print("OpenCV not installed properly")
+
+# Modern color scheme
+COLORS = {
+    'primary': '#2c3e50',
+    'secondary': '#34495e',
+    'accent': '#3498db',
+    'success': '#2ecc71',
+    'warning': '#f39c12',
+    'danger': '#e74c3c',
+    'light': '#ecf0f1',
+    'dark': '#2c3e50',
+    'text': '#2c3e50',
+    'background': '#f8f9fa'
+}
+
+class FaceRecognitionSystem:
+    def __init__(self):
+        # Initialize face detector - using Haar Cascade only
+        try:
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            print("Face detector initialized successfully")
+        except:
+            print("Error initializing face detector")
+            self.face_cascade = None
+        
+        # Storage for known faces
+        self.known_face_encodings = []
+        self.known_face_names = []
+        
+        # Load existing data
+        self.load_face_data()
+    
+    def load_face_data(self):
+        """Load face data from file"""
+        if os.path.exists("face_data.pkl"):
+            try:
+                with open("face_data.pkl", 'rb') as f:
+                    data = pickle.load(f)
+                    self.known_face_encodings = data['encodings']
+                    self.known_face_names = data['names']
+                print(f"Loaded {len(self.known_face_names)} known faces")
+            except:
+                print("Error loading face data")
+                self.known_face_encodings = []
+                self.known_face_names = []
+        else:
+            self.known_face_encodings = []
+            self.known_face_names = []
+    
+    def save_face_data(self):
+        """Save face data to file"""
+        try:
+            with open("face_data.pkl", 'wb') as f:
+                pickle.dump({
+                    'encodings': self.known_face_encodings,
+                    'names': self.known_face_names
+                }, f)
+            return True
+        except:
+            print("Error saving face data")
+            return False
+    
+    def delete_all_data(self):
+        """Delete all face data and training images"""
+        try:
+            # Clear memory data
+            self.known_face_encodings = []
+            self.known_face_names = []
+            
+            # Delete data file
+            if os.path.exists("face_data.pkl"):
+                os.remove("face_data.pkl")
+            
+            # Delete training directory
+            if os.path.exists("training_data"):
+                shutil.rmtree("training_data")
+                os.makedirs("training_data")
+            
+            # Delete result images
+            for file in os.listdir('.'):
+                if file.startswith('result_') or file.startswith('camera_capture_'):
+                    os.remove(file)
+            
+            print("All data deleted successfully")
+            return True
+        except Exception as e:
+            print(f"Error deleting data: {e}")
+            return False
+    
+    def delete_single_face(self, name):
+        """Delete a specific face from the database"""
+        try:
+            # Find all indices with the given name
+            indices_to_remove = [i for i, n in enumerate(self.known_face_names) if n == name]
+            
+            if not indices_to_remove:
+                return False, "Name not found in database"
+            
+            # Remove from memory
+            for index in sorted(indices_to_remove, reverse=True):
+                del self.known_face_encodings[index]
+                del self.known_face_names[index]
+            
+            # Save updated data
+            self.save_face_data()
+            
+            # Delete training images
+            training_dir = "training_data"
+            if os.path.exists(training_dir):
+                for file in os.listdir(training_dir):
+                    if file.startswith(f"{name}_"):
+                        os.remove(os.path.join(training_dir, file))
+            
+            return True, f"Deleted all data for {name}"
+        except Exception as e:
+            return False, f"Error deleting face: {str(e)}"
+    
+    def get_all_names(self):
+        """Get all unique names in the database"""
+        return list(set(self.known_face_names))
+    
+    def detect_faces(self, image):
+        """Detect faces using Haar Cascade"""
+        if self.face_cascade is None:
+            return []
+            
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(
+            gray, 
+            scaleFactor=1.1, 
+            minNeighbors=5, 
+            minSize=(30, 30)
+        )
+        return faces
+    
+    def recognize_face(self, face_roi):
+        """Simple face recognition using template matching"""
+        if not self.known_face_encodings:
+            return "Unknown", 0, 0
+            
+        gray_face = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+        gray_face = cv2.resize(gray_face, (100, 100))
+        
+        best_match = "Unknown"
+        best_score = 0
+        best_match_idx = -1
+        
+        for i, known_face in enumerate(self.known_face_encodings):
+            # Resize known face to match current face
+            known_face_resized = cv2.resize(known_face, (100, 100))
+            
+            # Calculate similarity score
+            result = cv2.matchTemplate(gray_face, known_face_resized, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            
+            if max_val > best_score:
+                best_score = max_val
+                best_match_idx = i
+        
+        if best_match_idx != -1 and best_score > 0.6:  # Threshold for recognition
+            best_match = self.known_face_names[best_match_idx]
+        
+        return best_match, best_score * 100, best_match_idx
+    
+    def add_new_face(self, image, face_region, name):
+        """Add a new face to the training set"""
+        x, y, w, h = face_region
+        face_roi = image[y:y+h, x:x+w]
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+        
+        # Add to training data
+        if not os.path.exists("training_data"):
+            os.makedirs("training_data")
+            
+        # Save face image
+        face_id = len(self.known_face_names)
+        cv2.imwrite(f"training_data/{name}_{face_id}.jpg", gray)
+        
+        # Update known faces
+        self.known_face_encodings.append(gray)
+        self.known_face_names.append(name)
+        
+        # Save face data
+        return self.save_face_data()
+    
+    def process_image(self, image, draw_rectangles=True):
+        """Process an image to detect and recognize faces"""
+        # Create a copy to avoid modifying the original
+        result_image = image.copy()
+        
+        # Detect faces
+        faces = self.detect_faces(image)
+        
+        # Process each face
+        results = []
+        for (x, y, w, h) in faces:
+            # Recognize face
+            face_roi = image[y:y+h, x:x+w]
+            name, confidence, match_idx = self.recognize_face(face_roi)
+            
+            # Draw rectangle and label if requested
+            if draw_rectangles:
+                color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+                cv2.rectangle(result_image, (x, y), (x+w, y+h), color, 2)
+                label = f"{name} ({confidence:.1f}%)" if name != "Unknown" else "Unknown"
+                cv2.putText(result_image, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            results.append({
+                'name': name,
+                'confidence': confidence,
+                'position': (x, y, w, h),
+                'face_image': image[y:y+h, x:x+w] if not draw_rectangles else None
+            })
+        
+        return result_image, results
+
+class ModernButton(tk.Button):
+    """Custom styled button"""
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.configure(
+            relief=tk.FLAT,
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        )
+
+class FaceRecognitionGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Advanced Face Recognition System")
+        self.root.geometry("1200x800")
+        self.root.configure(bg=COLORS['background'])
+        
+        # Set application icon (if available)
+        try:
+            self.root.iconbitmap("face_icon.ico")
+        except:
+            pass
+        
+        # Camera variables
+        self.camera = None
+        self.is_camera_active = False
+        self.current_frame = None
+        self.captured_photos = []  # Store captured photos
+        
+        try:
+            self.face_system = FaceRecognitionSystem()
+            self.setup_ui()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize: {str(e)}")
+            self.root.destroy()
+    
+    def setup_ui(self):
+        # Configure style
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Configure colors
+        style.configure('TFrame', background=COLORS['background'])
+        style.configure('TLabel', background=COLORS['background'], foreground=COLORS['text'])
+        style.configure('TButton', background=COLORS['accent'], foreground='white')
+        style.configure('Header.TLabel', font=('Arial', 18, 'bold'))
+        
+        # Main frame
+        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Header
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        title_label = ttk.Label(header_frame, text="🤖 Advanced Face Recognition System", 
+                               style='Header.TLabel', foreground=COLORS['primary'])
+        title_label.pack(side=tk.LEFT)
+        
+        # Stats label
+        self.stats_var = tk.StringVar()
+        self.update_stats()
+        stats_label = ttk.Label(header_frame, textvariable=self.stats_var, 
+                               font=("Arial", 10), foreground=COLORS['secondary'])
+        stats_label.pack(side=tk.RIGHT)
+        
+        # Control panel
+        control_frame = ttk.LabelFrame(main_frame, text="Control Panel", padding=15)
+        control_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # Button grid
+        btn_grid = ttk.Frame(control_frame)
+        btn_grid.pack(fill=tk.X)
+        
+        # Row 1
+        ModernButton(btn_grid, text="📷 Open Camera", command=self.start_camera,
+                    bg=COLORS['accent']).grid(row=0, column=0, padx=5, pady=5)
+        ModernButton(btn_grid, text="📸 Capture Photo", command=self.capture_photo,
+                    bg=COLORS['warning']).grid(row=0, column=1, padx=5, pady=5)
+        ModernButton(btn_grid, text="❌ Close Camera", command=self.stop_camera,
+                    bg=COLORS['danger']).grid(row=0, column=2, padx=5, pady=5)
+        
+        # Row 2
+        ModernButton(btn_grid, text="🖼️ Process Image", command=self.process_image,
+                    bg=COLORS['primary']).grid(row=1, column=0, padx=5, pady=5)
+        ModernButton(btn_grid, text="➕ Add New Face", command=self.add_face,
+                    bg=COLORS['success']).grid(row=1, column=1, padx=5, pady=5)
+        
+        # Row 3 - Data management
+        ModernButton(btn_grid, text="🗑️ Delete Face Data", command=self.delete_face_dialog,
+                    bg=COLORS['danger']).grid(row=2, column=0, padx=5, pady=5)
+        ModernButton(btn_grid, text="💥 Delete All Data", command=self.delete_all_data_dialog,
+                    bg=COLORS['danger']).grid(row=2, column=1, padx=5, pady=5)
+        ModernButton(btn_grid, text="🔄 Refresh Data", command=self.refresh_data,
+                    bg=COLORS['secondary']).grid(row=2, column=2, padx=5, pady=5)
+        
+        # Main content area
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Left panel - Camera and gallery
+        left_panel = ttk.Frame(content_frame, width=450)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 15))
+        
+        # Camera frame
+        camera_container = ttk.LabelFrame(left_panel, text="Live Camera Feed", padding=10)
+        camera_container.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        self.camera_frame = ttk.Frame(camera_container, height=300)
+        self.camera_frame.pack(fill=tk.BOTH, expand=True)
+        self.camera_frame.pack_propagate(False)
+        
+        self.camera_label = ttk.Label(self.camera_frame, text="Camera will appear here when opened 👆", 
+                                     font=("Arial", 11), foreground=COLORS['secondary'])
+        self.camera_label.pack(expand=True)
+        
+        # Gallery frame
+        gallery_frame = ttk.LabelFrame(left_panel, text="📁 Captured Photos Gallery", padding=10)
+        gallery_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create canvas with scrollbar for gallery
+        gallery_canvas = tk.Canvas(gallery_frame, bg=COLORS['light'], height=200)
+        gallery_scrollbar = ttk.Scrollbar(gallery_frame, orient=tk.HORIZONTAL, command=gallery_canvas.xview)
+        self.gallery_content = ttk.Frame(gallery_canvas)
+        
+        gallery_canvas.create_window((0, 0), window=self.gallery_content, anchor="nw")
+        gallery_canvas.configure(xscrollcommand=gallery_scrollbar.set)
+        
+        gallery_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        gallery_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Right panel - Results
+        right_panel = ttk.Frame(content_frame, width=500)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        results_container = ttk.LabelFrame(right_panel, text="📊 Recognition Results", padding=10)
+        results_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Results text area with modern scrollbar
+        text_frame = ttk.Frame(results_container)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.result_text = tk.Text(text_frame, height=25, width=60, font=("Consolas", 10),
+                                  bg=COLORS['light'], relief=tk.FLAT, padx=10, pady=10)
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.result_text.yview)
+        self.result_text.configure(yscrollcommand=scrollbar.set)
+        
+        self.result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Status bar
+        status_frame = ttk.Frame(main_frame, relief=tk.SUNKEN)
+        status_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.status_var = tk.StringVar()
+        self.status_var.set("✅ System Ready - Loaded 0 faces in database")
+        status_label = ttk.Label(status_frame, textvariable=self.status_var, 
+                                font=("Arial", 9), foreground=COLORS['secondary'])
+        status_label.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        # Version label
+        version_label = ttk.Label(status_frame, text="v2.0 © 2024", 
+                                 font=("Arial", 8), foreground=COLORS['secondary'])
+        version_label.pack(side=tk.RIGHT, padx=10, pady=5)
+    
+    def update_stats(self):
+        """Update statistics display"""
+        count = len(set(self.face_system.known_face_names))
+        self.stats_var.set(f"👤 {count} faces in database | 📷 {len(self.captured_photos)} photos captured")
+    
+    def refresh_data(self):
+        """Refresh face data"""
+        self.face_system.load_face_data()
+        self.update_stats()
+        self.status_var.set("✅ Database refreshed successfully")
+    
+    def delete_face_dialog(self):
+        """Dialog to delete a specific face"""
+        names = self.face_system.get_all_names()
+        if not names:
+            messagebox.showinfo("Info", "No faces found in database to delete")
+            return
+        
+        # Create dialog window
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Delete Face Data")
+        dialog.geometry("400x200")
+        dialog.configure(bg=COLORS['background'])
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Select face to delete:", font=("Arial", 11)).pack(pady=10)
+        
+        # Name selection
+        name_var = tk.StringVar()
+        name_combo = ttk.Combobox(dialog, textvariable=name_var, values=names, state="readonly")
+        name_combo.pack(pady=5, padx=20, fill=tk.X)
+        name_combo.current(0)
+        
+        # Buttons
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=20)
+        
+        ModernButton(btn_frame, text="🗑️ Delete", command=lambda: self.delete_face(name_var.get(), dialog),
+                    bg=COLORS['danger']).pack(side=tk.LEFT, padx=10)
+        ModernButton(btn_frame, text="❌ Cancel", command=dialog.destroy,
+                    bg=COLORS['secondary']).pack(side=tk.RIGHT, padx=10)
+    
+    def delete_face(self, name, dialog):
+        """Delete specific face data"""
+        success, message = self.face_system.delete_single_face(name)
+        if success:
+            messagebox.showinfo("Success", message)
+            self.update_stats()
+            self.status_var.set(f"✅ {message}")
+        else:
+            messagebox.showerror("Error", message)
+        dialog.destroy()
+    
+    def delete_all_data_dialog(self):
+        """Confirmation dialog for deleting all data"""
+        result = messagebox.askyesno(
+            "Confirm Delete All",
+            "⚠️  WARNING: This will delete ALL face data, training images, and results!\n\n"
+            "This action cannot be undone. Are you sure you want to continue?",
+            icon='warning'
+        )
+        
+        if result:
+            success = self.face_system.delete_all_data()
+            if success:
+                messagebox.showinfo("Success", "All data has been deleted successfully")
+                self.update_stats()
+                self.status_var.set("✅ All data deleted successfully")
+                # Clear gallery
+                for widget in self.gallery_content.winfo_children():
+                    widget.destroy()
+                self.captured_photos = []
+            else:
+                messagebox.showerror("Error", "Failed to delete all data")
+    
+    def start_camera(self):
+        """Start the camera"""
+        try:
+            self.camera = cv2.VideoCapture(0)
+            if not self.camera.isOpened():
+                messagebox.showerror("Error", "Could not access camera")
+                return
+            
+            self.is_camera_active = True
+            self.camera_label.configure(text="")
+            self.status_var.set("📷 Camera active - Real-time face detection enabled")
+            self.update_camera_frame()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start camera: {str(e)}")
+    
+    def stop_camera(self):
+        """Stop the camera"""
+        self.is_camera_active = False
+        if self.camera:
+            self.camera.release()
+        self.camera_label.configure(text="Camera will appear here when opened 👆")
+        self.status_var.set("📷 Camera closed")
+    
+    def update_camera_frame(self):
+        """Update the camera preview frame with real-time face recognition"""
+        if self.is_camera_active and self.camera:
+            ret, frame = self.camera.read()
+            if ret:
+                self.current_frame = frame.copy()
+                
+                # Process frame for real-time face recognition (without drawing)
+                _, results = self.face_system.process_image(frame, draw_rectangles=False)
+                
+                # Draw recognition results on the frame
+                for result in results:
+                    x, y, w, h = result['position']
+                    name, confidence = result['name'], result['confidence']
+                    
+                    color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+                    label = f"{name} ({confidence:.1f}%)" if name != "Unknown" else "Unknown"
+                    cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+                # Convert to RGB and resize for display
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_resized = cv2.resize(frame_rgb, (400, 300))
+                
+                # Convert to PhotoImage for tkinter
+                img = Image.fromarray(frame_resized)
+                imgtk = ImageTk.PhotoImage(image=img)
+                
+                self.camera_label.imgtk = imgtk
+                self.camera_label.configure(image=imgtk)
+            
+            # Schedule next update
+            if self.is_camera_active:
+                self.root.after(10, self.update_camera_frame)
+    
+    def capture_photo(self):
+        """Capture a photo from the camera"""
+        if not self.is_camera_active:
+            messagebox.showwarning("Camera Not Active", "Please open the camera first by clicking 'Open Camera'")
+            return
+            
+        if self.current_frame is not None:
+            # Save the captured image
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"camera_capture_{timestamp}.jpg"
+            cv2.imwrite(filename, self.current_frame)
+            
+            # Add to captured photos display
+            self.add_captured_photo(filename)
+            
+            # Process the captured image
+            self.process_image_file(filename)
+    
+    def add_captured_photo(self, image_path):
+        """Add a captured photo to the display"""
+        try:
+            # Load and resize the image
+            img = Image.open(image_path)
+            img.thumbnail((120, 120), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            
+            # Create a frame for the image
+            frame = ttk.Frame(self.gallery_content, relief=tk.RAISED, borderwidth=1)
+            
+            # Image label
+            img_label = ttk.Label(frame, image=photo)
+            img_label.image = photo  # Keep a reference
+            img_label.pack(pady=5)
+            
+            # Filename label
+            filename = os.path.basename(image_path)
+            name_label = ttk.Label(frame, text=filename, font=("Arial", 8), 
+                                  wraplength=100, justify=tk.CENTER)
+            name_label.pack(pady=2)
+            
+            # Add click event to view image
+            img_label.bind("<Button-1>", lambda e: self.view_image(image_path))
+            name_label.bind("<Button-1>", lambda e: self.view_image(image_path))
+            
+            frame.pack(side=tk.LEFT, padx=8, pady=8)
+            self.captured_photos.append(frame)
+            
+            # Update scroll region
+            self.gallery_content.update_idletasks()
+            
+        except Exception as e:
+            print(f"Error displaying captured photo: {e}")
+    
+    def view_image(self, image_path):
+        """View image in larger window"""
+        img = Image.open(image_path)
+        img.show()
+    
+    def add_face_from_camera(self, image_path):
+        """Add a face from a camera capture"""
+        # Load and detect faces in the image
+        image = cv2.imread(image_path)
+        if image is None:
+            messagebox.showerror("Error", "Could not load captured image")
+            return
+            
+        faces = self.face_system.detect_faces(image)
+        
+        if len(faces) == 0:
+            messagebox.showerror("Error", "No faces detected in the captured image")
+            return
+        
+        # Use the first face found
+        face_region = faces[0]
+        
+        # Ask for the name
+        name = simpledialog.askstring("Input", "Enter the name for this face:")
+        if not name:
+            return
+        
+        # Add the face
+        success = self.face_system.add_new_face(image, face_region, name)
+        
+        if success:
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"✅ SUCCESS: Added new face '{name}' from camera\n")
+            self.result_text.insert(tk.END, f"You can now process images to recognize this face.\n")
+            self.status_var.set(f"✅ Added new face: {name}")
+            self.update_stats()
+        else:
+            messagebox.showerror("Error", "Failed to add face")
+    
+    def process_image_file(self, file_path):
+        """Process an image file"""
+        image = cv2.imread(file_path)
+        if image is None:
+            messagebox.showerror("Error", "Could not load image")
+            return
+        
+        self.status_var.set("⏳ Processing image...")
+        self.root.update()
+        
+        # Process the image
+        result_image, results = self.face_system.process_image(image)
+        
+        # Display results
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"📷 Image: {os.path.basename(file_path)}\n")
+        self.result_text.insert(tk.END, "=" * 60 + "\n")
+        self.result_text.insert(tk.END, f"👥 Faces detected: {len(results)}\n\n")
+        
+        for i, result in enumerate(results):
+            confidence_color = "#2ecc71" if result['confidence'] > 70 else "#f39c12" if result['confidence'] > 50 else "#e74c3c"
+            self.result_text.insert(tk.END, f"👤 Face {i+1}:\n")
+            self.result_text.insert(tk.END, f"   Name: {result['name']}\n")
+            self.result_text.insert(tk.END, f"   Confidence: ")
+            self.result_text.insert(tk.END, f"{result['confidence']:.1f}%", f"confidence_{i}")
+            self.result_text.insert(tk.END, f"\n   Position: (x={result['position'][0]}, y={result['position'][1]})\n")
+            self.result_text.insert(tk.END, f"   Size: {result['position'][2]}x{result['position'][3]}\n")
+            self.result_text.insert(tk.END, "─" * 40 + "\n")
+            
+            # Configure confidence color
+            self.result_text.tag_config(f"confidence_{i}", foreground=confidence_color)
+        
+        # Save the result image
+        output_path = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        cv2.imwrite(output_path, result_image)
+        
+        # Display the image
+        img_rgb = cv2.cvtColor(result_image, cv2.COLOR_BGR2RGB)
+        plt.figure(figsize=(12, 8))
+        plt.imshow(img_rgb)
+        plt.title("Face Detection Results")
+        plt.axis('off')
+        plt.tight_layout()
+        plt.show()
+        
+        self.status_var.set(f"✅ Completed! Results saved as {output_path}")
+    
+    def process_image(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Image",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")]
+        )
+        
+        if not file_path:
+            return
+        
+        self.process_image_file(file_path)
+    
+    def add_face(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Image with Face to Add",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")]
+        )
+        
+        if not file_path:
+            return
+        
+        # Load and detect faces in the image
+        image = cv2.imread(file_path)
+        if image is None:
+            messagebox.showerror("Error", "Could not load image")
+            return
+            
+        faces = self.face_system.detect_faces(image)
+        
+        if len(faces) == 0:
+            messagebox.showerror("Error", "No faces detected in the image")
+            return
+        
+        # Use the first face found
+        face_region = faces[0]
+        
+        # Ask for the name
+        name = simpledialog.askstring("Input", "Enter the name for this face:")
+        if not name:
+            return
+        
+        # Add the face
+        success = self.face_system.add_new_face(image, face_region, name)
+        
+        if success:
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, f"✅ SUCCESS: Added new face '{name}'\n")
+            self.result_text.insert(tk.END, f"You can now process images to recognize this face.\n")
+            self.status_var.set(f"✅ Added new face: {name}")
+            self.update_stats()
+        else:
+            messagebox.showerror("Error", "Failed to add face")
+
+if __name__ == "__main__":
+    # Test if OpenCV is working
+    try:
+        import cv2
+        print("OpenCV imported successfully")
+        root = tk.Tk()
+        app = FaceRecognitionGUI(root)
+        root.mainloop()
+    except ImportError:
+        print("ERROR: OpenCV not installed. Run: pip install opencv-python")
+    except Exception as e:
+        print(f"ERROR: {e}")
