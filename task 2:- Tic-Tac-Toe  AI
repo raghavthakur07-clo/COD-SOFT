@@ -1,0 +1,146 @@
+# Tic-Tac-Toe with a smart computer opponent
+# Created by a passionate programmer
+
+import math
+
+# Let's set up our game board
+game_board = [" "] * 9  # 9 empty spaces for our 3x3 grid
+
+# Show the current game state
+def show_board():
+    print("\nCurrent board:")
+    print("-------------")
+    for i in range(3):
+        row = game_board[i*3:(i+1)*3]
+        print(f"| {' | '.join(row)} |")
+        print("-------------")
+    print()  # little space for readability
+
+# Check if someone has won
+def check_win(current_board, player):
+    # All possible winning combinations
+    winning_lines = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],  # rows
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],  # columns
+        [0, 4, 8], [2, 4, 6]              # diagonals
+    ]
+    
+    # Check each possible winning line
+    for line in winning_lines:
+        if current_board[line[0]] == current_board[line[1]] == current_board[line[2]] == player:
+            return True
+    return False
+
+# Check if the board is completely filled
+def board_full(current_board):
+    return " " not in current_board
+
+# The brain of our computer player
+def find_best_move():
+    best_score = -math.inf
+    best_move = None
+    
+    # Try every possible move
+    for position in range(9):
+        if game_board[position] == " ":
+            # Try this move
+            game_board[position] = "O"
+            # See how good it is
+            move_score = evaluate_move(game_board, 0, False)
+            # Undo the move
+            game_board[position] = " "
+            
+            # Keep track of the best move found
+            if move_score > best_score:
+                best_score = move_score
+                best_move = position
+                
+    return best_move
+
+# Evaluate how good a move is using minimax
+def evaluate_move(current_board, depth, is_max_turn):
+    # Base cases - game over situations
+    if check_win(current_board, "O"):
+        return 10 - depth  # Win is good, but quicker wins are better
+    if check_win(current_board, "X"):
+        return depth - 10  # Loss is bad, but if we have to lose, make it take longer
+    if board_full(current_board):
+        return 0  # Draw is neutral
+    
+    if is_max_turn:  # Computer's turn - trying to maximize score
+        best_score = -math.inf
+        for i in range(9):
+            if current_board[i] == " ":
+                current_board[i] = "O"
+                score = evaluate_move(current_board, depth + 1, False)
+                current_board[i] = " "
+                best_score = max(score, best_score)
+        return best_score
+    else:  # Human's turn - trying to minimize score
+        best_score = math.inf
+        for i in range(9):
+            if current_board[i] == " ":
+                current_board[i] = "X"
+                score = evaluate_move(current_board, depth + 1, True)
+                current_board[i] = " "
+                best_score = min(score, best_score)
+        return best_score
+
+# Let's play!
+def start_game():
+    print("🎯 Welcome to Tic-Tac-Toe!")
+    print("You're X, and I'm O. Let's see if you can beat me!")
+    print("Positions are numbered 1-9 from top-left to bottom-right.")
+    
+    show_board()
+    
+    while True:
+        # Human player's turn
+        try:
+            player_move = int(input("Your turn! Choose a spot (1-9): ")) - 1
+            
+            if player_move < 0 or player_move > 8:
+                print("Whoops! Please pick a number between 1 and 9.")
+                continue
+                
+            if game_board[player_move] != " ":
+                print("That spot's already taken! Try another one.")
+                continue
+                
+        except ValueError:
+            print("That's not a valid number! Please try again.")
+            continue
+            
+        game_board[player_move] = "X"
+        show_board()
+        
+        # Check if human won
+        if check_win(game_board, "X"):
+            print("Wow, you won! Great job! 🎉")
+            break
+            
+        # Check if it's a draw
+        if board_full(game_board):
+            print("It's a draw! Good game. 🤝")
+            break
+            
+        # Computer's turn
+        print("My turn... thinking...")
+        computer_move = find_best_move()
+        game_board[computer_move] = "O"
+        print(f"I'll go with position {computer_move + 1}")
+        show_board()
+        
+        # Check if computer won
+        if check_win(game_board, "O"):
+            print("I win! Better luck next time! 😉")
+            break
+            
+        # Check if it's a draw
+        if board_full(game_board):
+            print("It's a tie! Well played! 👏")
+            break
+
+# Start the game when we run this file
+if __name__ == "__main__":
+    start_game()
